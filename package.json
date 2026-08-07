@@ -1,0 +1,31 @@
+{
+  "name": "forge-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop companion for Forge OS",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-store": "^2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "autoprefixer": "^10.5.4",
+    "esbuild": "^0.28.1",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1"
+  }
+}
