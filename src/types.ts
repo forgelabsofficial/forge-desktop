@@ -32,3 +32,6 @@ export interface ChatMessage {
   text: string;
   at: number;
 }
+
+// Re-export ConnectionProfile from connectionManager
+export type { ConnectionProfile } from "./connectionManager";

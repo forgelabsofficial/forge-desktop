@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionConfig, ToolDefinition } from "../types";
-import { callTool, listTools } from "../api";
+import { callTool } from "../api";
+import { ToolValidator } from "../toolValidator";
 
 interface Props {
   cfg: ConnectionConfig;
@@ -15,10 +16,18 @@ export default function ToolsView({ cfg }: Props) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
+  const validatorRef = useRef<ToolValidator | null>(null);
+
   useEffect(() => {
-    listTools(cfg)
+    const validator = new ToolValidator(cfg);
+    validatorRef.current = validator;
+    validator
+      .load()
       .then((t) => setTools(t.sort((a, b) => a.function.name.localeCompare(b.function.name))))
       .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      validatorRef.current = null;
+    };
   }, [cfg]);
 
   const filtered = useMemo(() => {
@@ -56,6 +65,18 @@ export default function ToolsView({ cfg }: Props) {
       }
     }
     try {
+      // Task 7: validate arguments against the device schema before invoking
+      const validator = validatorRef.current;
+      if (validator) {
+        const v = await validator.validate(f.name, coerced);
+        if (!v.valid) {
+          setResult({
+            ok: false,
+            text: "Validation failed:\n" + v.errors.map((e) => "- " + e).join("\n"),
+          });
+          return;
+        }
+      }
       const out = await callTool(cfg, f.name, coerced);
       setResult({ ok: true, text: out });
     } catch (e) {
@@ -118,9 +139,20 @@ export default function ToolsView({ cfg }: Props) {
           </div>
         ) : (
           <div className="mx-auto max-w-xl">
-            <h2 className="font-mono text-lg font-semibold text-forge-accent">
-              {selected.function.name}
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-mono text-lg font-semibold text-forge-accent">
+                {selected.function.name}
+              </h2>
+              <button
+                onClick={() => {
+                  const def = validatorRef.current?.generateTypeDefinition(selected.function.name);
+                  if (def) navigator.clipboard.writeText(def);
+                }}
+                className="rounded-lg border border-forge-border px-3 py-1.5 text-[11px] font-medium text-forge-text transition hover:border-forge-accent"
+              >
+                Copy TS types
+              </button>
+            </div>
             <p className="mt-1 text-sm leading-relaxed text-forge-muted">
               {selected.function.description}
             </p>

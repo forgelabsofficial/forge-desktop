@@ -1,13 +1,18 @@
 import { useState } from "react";
 import type { ConnectionConfig } from "../types";
 import { checkStatus } from "../api";
+import PairingScreen from "./PairingScreen";
+import type { ConnectionProfile } from "../connectionManager";
 
 interface Props {
   initial: ConnectionConfig;
   onConnect: (cfg: ConnectionConfig) => void;
 }
 
+type Screen = "connect" | "pairing";
+
 export default function ConnectScreen({ initial, onConnect }: Props) {
+  const [screen, setScreen] = useState<Screen>("connect");
   const [host, setHost] = useState(initial.host);
   const [port, setPort] = useState(String(initial.port));
   const [token, setToken] = useState(initial.token);
@@ -30,6 +35,25 @@ export default function ConnectScreen({ initial, onConnect }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handlePairingComplete(profile: ConnectionProfile) {
+    // Convert profile to ConnectionConfig
+    const cfg: ConnectionConfig = {
+      host: profile.host,
+      port: profile.port,
+      token: profile.token,
+    };
+    onConnect(cfg);
+  }
+
+  if (screen === "pairing") {
+    return (
+      <PairingScreen
+        onPairingComplete={handlePairingComplete}
+        onCancel={() => setScreen("connect")}
+      />
+    );
   }
 
   return (
@@ -93,6 +117,22 @@ export default function ConnectScreen({ initial, onConnect }: Props) {
             className="w-full rounded-lg bg-forge-accent px-3 py-2 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? "Connecting…" : "Connect"}
+          </button>
+
+          <div className="relative py-2">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-forge-border"></div>
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-forge-panel px-2 text-forge-muted">or</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setScreen("pairing")}
+            className="w-full rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm font-medium text-forge-text transition hover:border-forge-accent hover:bg-forge-panel"
+          >
+            Pair New Device
           </button>
 
           <p className="text-center text-[11px] leading-relaxed text-forge-muted">

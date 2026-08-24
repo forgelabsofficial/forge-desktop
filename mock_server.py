@@ -4,15 +4,33 @@ Mimics the real device's minimal HTTP/1.1 server (Connection: close,
 Bearer auth, JSON bodies) so the React frontend can be browser-tested
 without a phone. Not used in production.
 
+Supports:
+- /api/status, /api/tools, /api/tool, /api/tool/{opId}/status, /api/tool/{opId}/cancel
+- /api/chat
+- /api/pairing/initiate, /api/pairing/confirm   (Task 22.2)
+- /api/clipboard, /api/config, /api/sync/stat   (stubs)
+- WebSocket /api/events when --ws is passed (Task 22.1, needs `websockets`)
+
 Usage:
-    python mock_server.py [port]     # default 8789, token = "test-token"
+    python mock_server.py [port] [--ws]          # default 8789, token = "test-token"
 """
 
 import json
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+import time
+import uuid
+
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = "test-token"
+
+# In-memory pairing codes: code -> (expires_at, desktop_name)
+PAIRING_CODES = {}
+PAIRING_TTL_S = 5 * 60
+
+# In-memory tool operations: op_id -> dict
+TOOL_OPS = {}
 
 TOOLS = [
     {
@@ -92,6 +110,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _auth_ok(self):
+        # Pairing endpoints are public; everything else needs the token.
+        if self.path.startswith("/api/pairing/"):
+            return True
         return self.headers.get("Authorization", "") == f"Bearer {TOKEN}"
 
     def _body(self):
@@ -111,28 +132,104 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._auth_ok():
             return self._send(401, {"error": "unauthorized"})
-        if self.path == "/api/status":
+        path = self.path.split("?")[0]
+        if path == "/api/status":
             return self._send(200, {"status": "ok", "port": self.server.server_port,
                                     "running": True, "server": "Forge OS HTTP (mock)"})
-        if self.path == "/api/tools":
+        if path == "/api/tools":
             return self._send(200, {"tools": TOOLS})
+        if path == "/api/events":
+            # HTTP(S) request to the WS endpoint: handshake is provided by the
+            # websockets thread when --ws is active; here we explain politely.
+            return self._send(501, {"error": "use ws:// (run with --ws and the "
+                                             "'websockets' package installed)"})
+        if path.startswith("/api/tool/") and path.endswith("/status"):
+            op_id = path[len("/api/tool/"):-len("/status")]
+            op = TOOL_OPS.get(op_id)
+            if not op:
+                return self._send(404, {"error": f"unknown op {op_id}"})
+            return self._send(200, {
+                "op_id": op_id,
+                "tool_name": op["tool_name"],
+                "status": op["status"],
+                "output": op.get("output"),
+                "error": op.get("error"),
+            })
+        if path == "/api/sync/stat":
+            return self._send(200, {"exists": False})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
         if not self._auth_ok():
             return self._send(401, {"error": "unauthorized"})
-        try:
-            data = self._body()
-        except Exception:
-            return self._send(400, {"error": "bad json"})
-        if self.path == "/api/tool":
+        path = self.path.split("?")[0]
+
+        # ── Task 22.2 - pairing ──────────────────────────────────────────────
+        if path == "/api/pairing/initiate":
+            try:
+                data = self._body()
+            except Exception:
+                data = {}
+            code = str(100000 + int(time.time() * 1000) % 900000)
+            PAIRING_CODES[code] = (time.time() + PAIRING_TTL_S, data.get("desktop_name", "Mock Desktop"))
+            return self._send(200, {"code": code, "expires_in": PAIRING_TTL_S})
+
+        if path == "/api/pairing/confirm":
+            try:
+                data = self._body()
+            except Exception:
+                data = {}
+            code = str(data.get("code", ""))
+            entry = PAIRING_CODES.pop(code, None)
+            if not entry:
+                return self._send(400, {"error": "invalid or expired code"})
+            now = time.time()
+            if entry[0] < now:
+                return self._send(400, {"error": "code expired"})
+            desktop_id = data.get("desktop_id") or f"mock-desktop-{uuid.uuid4().hex[:8]}"
+            # Mock JWT (not signed; matching shape only)
+            token = "mock-jwt." + uuid.uuid4().hex + ".sig"
+            return self._send(200, {
+                "token": token,
+                "desktop_id": desktop_id,
+                "device": {
+                    "model": "Pixel Mock",
+                    "android_version": "14",
+                    "forge_os_version": "0.1.0-mock",
+                    "capabilities": ["tools", "sync", "clipboard", "notifications"],
+                },
+            })
+
+        # ── Task 22.3 - async tool execution ────────────────────────────────
+        if path == "/api/tool":
+            try:
+                data = self._body()
+            except Exception:
+                return self._send(400, {"error": "bad json"})
             name = data.get("name")
             if not name:
                 return self._send(400, {"error": "missing 'name'"})
-            return self._send(200, {"ok": True,
-                                    "output": f"[mock] {name} executed with args: "
-                                              + json.dumps(data.get("args", {}))})
-        if self.path == "/api/chat":
+            op_id = uuid.uuid4().hex
+            TOOL_OPS[op_id] = {"tool_name": name, "status": "completed",
+                               "output": f"[mock] {name} executed with args: "
+                                         + json.dumps(data.get("args", {}))}
+            return self._send(200, {"opId": op_id, "ok": True, "output": "operation started"})
+
+        if path.startswith("/api/tool/") and path.endswith("/cancel"):
+            op_id = path[len("/api/tool/"):-len("/cancel")]
+            op = TOOL_OPS.get(op_id)
+            if not op:
+                return self._send(404, {"error": f"unknown op {op_id}"})
+            op["status"] = "cancelled"
+            op["error"] = {"code": "CANCELLED", "message": "cancelled by user"}
+            return self._send(200, {"cancelled": True, "op_id": op_id})
+
+        # ── Stubs the frontend calls during normal operation ────────────────
+        if path == "/api/chat":
+            try:
+                data = self._body()
+            except Exception:
+                return self._send(400, {"error": "bad json"})
             msg = data.get("message")
             if not msg:
                 return self._send(400, {"error": "missing 'message'"})
@@ -143,10 +240,59 @@ class Handler(BaseHTTPRequestHandler):
                                              "from the mock server — the real reply comes from "
                                              "ReActAgent on your device.",
                                     "session_id": sid})
+        if path == "/api/clipboard":
+            return self._send(200, {"updated": True})
+        if path == "/api/config":
+            return self._send(200, {"ok": True, "saved": True})
         self._send(404, {"error": "not found"})
 
 
+def start_ws_server(port):
+    """Task 22.1 - optional WebSocket /api/events via the `websockets` lib."""
+    try:
+        import websockets
+        import asyncio
+    except ImportError:
+        print("[mock] 'websockets' package not installed; WS events disabled. "
+              "Install with: pip install websockets")
+        return
+
+    async def handler(ws):
+        try:
+            await ws.send(json.dumps({"type": "welcome", "timestamp": int(time.time() * 1000)}))
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+                mtype = msg.get("type")
+                if mtype == "auth":
+                    await ws.send(json.dumps({"type": "auth_ok"}))
+                elif mtype == "subscribe":
+                    await ws.send(json.dumps({"type": "subscribed", "events": msg.get("events", [])}))
+                elif mtype == "ping":
+                    await ws.send(json.dumps({"type": "pong"}))
+        except Exception:
+            pass
+
+    async def serve():
+        async with websockets.serve(handler, "127.0.0.1", port):
+            await asyncio.Future()
+
+    print(f"[mock] WS /api/events on ws://127.0.0.1:{port}/api/events")
+    threading.Thread(target=lambda: asyncio.run(serve()), daemon=True).start()
+
+
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8789
+    args = sys.argv[1:]
+    port = 8789
+    ws_enabled = False
+    for a in args:
+        if a == "--ws":
+            ws_enabled = True
+        elif a.isdigit():
+            port = int(a)
     print(f"Mock Forge server on http://127.0.0.1:{port}  (token: {TOKEN})")
-    HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    if ws_enabled:
+        start_ws_server(port)
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
