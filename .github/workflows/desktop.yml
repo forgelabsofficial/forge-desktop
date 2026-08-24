@@ -50,18 +50,19 @@ jobs:
         with:
           projectPath: .
           args: --verbose
+          # NOTE: tauri-action picks up macOS signing/notarization from the
+          # process env ONLY when the secrets exist. Do NOT add an env: block
+          # here with empty ${{ secrets.* }} values - an empty APPLE_CERTIFICATE
+          # makes the macOS runner fail with "failed to import keychain
+          # certificate". To enable signing later, add env: with the real
+          # secret names (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD,
+          # APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+          # for macOS; WINDOWS_CERTIFICATE, WINDOWS_CERTIFICATE_PASSWORD,
+          # WINDOWS_CERTIFICATE_THUMBPRINT + tauri.conf.json
+          # bundle.windows.certificateThumbprint for Windows) once the
+          # corresponding repository secrets are configured.
         env:
-          # ── Optional macOS signing + notarization (secrets) ─────────────
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # ── Optional Windows code signing (secrets) ─────────────────────
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload installers
