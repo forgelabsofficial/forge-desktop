@@ -1,0 +1,66 @@
+name: Desktop Build
+
+# Builds Forge Desktop installers for Windows (.exe/.msi) and macOS (.dmg/.app).
+# Windows can only produce Windows bundles and macOS only macOS bundles, so a
+# per-OS matrix of GitHub-hosted runners is the standard approach.
+#
+# macOS: macos-latest = Apple Silicon (arm64 dmg), macos-13 = Intel (x64 dmg).
+#   On a PUBLIC repo both are free; on a private repo macOS minutes cost ~10x.
+# Windows: produces the NSIS setup.exe + MSI (WiX is fetched automatically).
+#
+# Signing/notarization is fully optional: fill the APPLE_*/WINDOWS_* secrets
+# to get Gatekeeper-clean macOS apps and SmartScreen-clean Windows installers.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # manual "Run workflow" button
+
+jobs:
+  build-desktop:
+    name: Forge Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-13, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build + bundle installers (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+          args: --verbose
+          uploadArtifacts: true
+        env:
+          # ── Optional macOS signing + notarization (secrets) ─────────────
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # ── Optional Windows code signing (secrets) ─────────────────────
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
