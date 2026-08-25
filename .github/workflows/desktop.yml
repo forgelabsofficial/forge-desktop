@@ -4,8 +4,11 @@ name: Desktop Build
 # Windows can only produce Windows bundles and macOS only macOS bundles, so a
 # per-OS matrix of GitHub-hosted runners is the standard approach.
 #
-# macOS: macos-latest = Apple Silicon (arm64 dmg), macos-13 = Intel (x64 dmg).
-#   On a PUBLIC repo both are free; on a private repo macOS minutes cost ~10x.
+# macOS: macos-15 = Apple Silicon (arm64 dmg). The Intel "macos-13" label was
+#   retired by GitHub in Dec 2025 - jobs on it queue forever as no runner
+#   exists. An Intel (x64) dmg needs a self-hosted runner or a paid
+#   "macos-15-intel" larger runner. On a PUBLIC repo macOS minutes are free;
+#   on a private repo they cost ~10x.
 # Windows: produces the NSIS setup.exe + MSI (WiX is fetched automatically).
 #
 # Signing/notarization is fully optional: fill the APPLE_*/WINDOWS_* secrets
@@ -22,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-13, macos-latest]
+        os: [windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
