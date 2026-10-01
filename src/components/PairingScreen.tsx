@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { initiatePairing, confirmPairing } from "../api";
+import { confirmPairing } from "../api";
 import { ConnectionManager } from "../connectionManager";
 import type { ConnectionProfile } from "../connectionManager";
 
@@ -20,7 +20,6 @@ interface Props {
 
 type PairingState =
   | "select-device"
-  | "initiating"
   | "entering-code"
   | "confirming"
   | "success"
@@ -62,34 +61,26 @@ export default function PairingScreen({
     }
   }, [state]);
 
-  const handleInitiatePairing = async () => {
+const handleInitiatePairing = async () => {
     setError("");
-    setState("initiating");
 
-    try {
-      const host = selectedDevice?.host || manualHost.trim();
-      const port = selectedDevice?.port || parseInt(manualPort, 10) || 8789;
+    const host = selectedDevice?.host || manualHost.trim();
 
-      if (!host) {
-        throw new Error("Please select a device or enter an IP address");
-      }
-
-      // Get desktop name (you could make this configurable)
-      const desktopName =
-        window.navigator?.userAgent?.includes("Windows")
-          ? "Windows Desktop"
-          : window.navigator?.userAgent?.includes("Mac")
-          ? "Mac Desktop"
-          : "Desktop";
-
-      await initiatePairing(host, port, desktopName);
-
-      // Pairing initiated successfully - now wait for user to enter code
-      setState("entering-code");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setState("select-device");
+    if (!host) {
+      setError("Please select a device or enter an IP address");
+      return;
     }
+
+    // We deliberately do NOT call POST /api/pairing/initiate.
+    //
+    // That endpoint mints a code on the device and returns it straight to us,
+    // so the "enter the code shown on your device" step was circular: the user
+    // never saw a code, and any LAN client could pair unattended.
+    //
+    // Forge OS now displays the code on the phone (Hub -> Tools -> Pair
+    // Desktop). The user reads it off the screen and types it here, and only
+    // that human-verified code is exchanged for a JWT via /api/pairing/confirm.
+    setState("entering-code");
   };
 
   const handleCodeInput = (index: number, value: string) => {
@@ -203,9 +194,8 @@ export default function PairingScreen({
           <p className="mt-2 text-sm text-forge-muted">
             {state === "select-device" &&
               "Select a device or enter connection details"}
-            {state === "initiating" && "Initiating pairing with device..."}
             {state === "entering-code" &&
-              "Enter the 6-digit code shown on your device"}
+              "Enter the 6-digit code shown on your phone"}
             {state === "confirming" && "Confirming pairing..."}
             {state === "success" && "Pairing successful!"}
           </p>
@@ -284,7 +274,7 @@ export default function PairingScreen({
                 }
                 className="w-full rounded-lg bg-forge-accent px-3 py-2 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Initiate Pairing
+                Continue
               </button>
 
               <button
@@ -296,15 +286,6 @@ export default function PairingScreen({
             </>
           )}
 
-          {/* Loading State - Initiating */}
-          {state === "initiating" && (
-            <div className="py-8 text-center">
-              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-forge-border border-t-forge-accent"></div>
-              <p className="mt-4 text-sm text-forge-muted">
-                Contacting device...
-              </p>
-            </div>
-          )}
 
           {/* Code Entry */}
           {state === "entering-code" && (
@@ -344,7 +325,7 @@ export default function PairingScreen({
               )}
 
               <div className="text-center text-xs text-forge-muted">
-                Check your device screen for the 6-digit code
+                Read the code from Forge OS on your phone
               </div>
 
               <button
@@ -413,7 +394,7 @@ export default function PairingScreen({
         {/* Help Text */}
         {state === "select-device" && (
           <p className="mt-4 text-center text-[11px] leading-relaxed text-forge-muted">
-            Ensure your device has the Forge OS pairing feature enabled
+            On your phone open Forge OS, then Hub › Tools › Pair Desktop
             <br />
             and both devices are on the same network
           </p>
