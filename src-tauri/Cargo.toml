@@ -26,7 +26,9 @@ tauri-plugin-log = "2"
 tauri-plugin-store = "2"
 mdns-sd = "0.11"
 flume = "0.11"
-tokio = { version = "1", features = ["full"] }
+# Only `tokio::time::sleep` is used (clipboard.rs, sync.rs). The "full" feature
+# pulled in fs/process/signal/net + macros for nothing — trim to what compiles.
+tokio = { version = "1", default-features = false, features = ["time"] }
 keyring = "3.6"
 notify = "6"
 sha2 = "0.10"
@@ -37,3 +39,27 @@ aes-gcm = "0.10"
 base64 = "0.22"
 tauri-plugin-notification = "2"
 rfd = "0.15"
+# ── Build weight tuning ──────────────────────────────────────────────────────
+# Tauri pulls in ~470 crates. Without these, dev builds emit full debug info for
+# every dependency, which makes linking slow and `target/` enormous (often 5-10 GB
+# on Windows). These settings cut build time and disk dramatically with zero
+# change to application behaviour.
+[profile.dev]
+debug = 0            # no debug info for our own code
+incremental = true   # faster rebuild loops
+
+[profile.dev.package."*"]
+opt-level = 1        # deps: slightly slower first build, far faster runtime
+debug = 0            # deps: the big one — no DWARF/PDB for the whole tree
+strip = "debuginfo"
+
+# Tuned for CI speed. "thin" LTO gets most of the size win at a fraction of the
+# link time of fat LTO + codegen-units=1, which matters a lot on a ~470-crate
+# tree like Tauri.
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 4
+strip = true
+# NOTE: deliberately NOT `panic = "abort"` - some transitive deps use
+# catch_unwind, so forcing abort risks a panic-kill at runtime.
