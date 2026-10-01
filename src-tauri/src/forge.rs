@@ -8,22 +8,37 @@ pub struct ForgeResponse {
     pub body: String,
 }
 
+/// Upper bound on the TCP connect phase.
+///
+/// The blocking `TcpStream::connect` uses the OS default SYN retry schedule,
+/// which on Windows takes ~21s to give up on an unreachable host. Combined with
+/// the frontend retry loop (api.ts allows 3 retries for GET) a single
+/// `/api/status` check against an offline device froze the UI for ~65s.
+///
+/// A device on the LAN answers in milliseconds or not at all, so a short
+/// connect timeout is safe and turns that stall into a sub-second failure.
+/// Read/write keep using the caller's full timeout.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
 fn connect(host: &str, port: u16, timeout_secs: u64) -> Result<TcpStream, String> {
     let timeout = Duration::from_secs(timeout_secs);
     let addr = format!("{}:{}", host, port);
-    let stream = TcpStream::connect(
-        &addr
-            .parse::<std::net::SocketAddr>()
-            .or_else(|_| {
-                use std::net::ToSocketAddrs;
-                addr.to_socket_addrs()
-                    .map_err(|e| e.to_string())?
-                    .next()
-                    .ok_or_else(|| format!("no address for {}", addr))
-            })
-            .map_err(|e| format!("invalid address {}: {}", addr, e))?,
-    )
-    .map_err(|e| format!("connect failed: {}", e))?;
+
+    // Resolve first: `connect_timeout` needs a concrete SocketAddr, so the
+    // name lookup has to happen before we can bound the handshake.
+    let resolved = match addr.parse::<std::net::SocketAddr>() {
+        Ok(sock) => sock,
+        Err(_) => {
+            use std::net::ToSocketAddrs;
+            addr.to_socket_addrs()
+                .map_err(|e| format!("invalid address {}: {}", addr, e))?
+                .next()
+                .ok_or_else(|| format!("no address for {}", addr))?
+        }
+    };
+
+    let stream = TcpStream::connect_timeout(&resolved, CONNECT_TIMEOUT)
+        .map_err(|e| format!("connect failed: {}", e))?;
 
     stream
         .set_read_timeout(Some(timeout))
