@@ -3,6 +3,7 @@ import type { ConnectionConfig } from "../types";
 import { checkStatus } from "../api";
 import PairingScreen from "./PairingScreen";
 import type { ConnectionProfile } from "../connectionManager";
+import forgeMark from "../assets/forge-mark.png";
 
 interface Props {
   initial: ConnectionConfig;
@@ -59,7 +60,13 @@ export default function ConnectScreen({ initial, onConnect }: Props) {
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <img
+            src={forgeMark}
+            alt="Forge Desktop"
+            className="mb-4 h-16 w-16"
+            draggable={false}
+          />
           <div className="text-3xl font-bold tracking-tight">
             Forge <span className="text-forge-accent">Desktop</span>
           </div>

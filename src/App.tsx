@@ -21,6 +21,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import { useTokenRotation } from "./hooks/useTokenRotation";
 import { HealthMonitor } from "./healthMonitor";
 import { useEventStream } from "./hooks/useEventStream";
+import forgeMark from "./assets/forge-mark.png";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 const STORE_KEY = "connection";
@@ -185,9 +186,17 @@ const {
       <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b border-forge-border bg-forge-panel px-4 py-2.5">
         <div className="flex items-center gap-6">
-          <span className="text-sm font-bold tracking-tight">
-            Forge <span className="text-forge-accent">Desktop</span>
-          </span>
+          <div className="flex items-center gap-2">
+            <img
+              src={forgeMark}
+              alt="Forge Desktop"
+              className="h-5 w-5"
+              draggable={false}
+            />
+            <span className="text-sm font-bold tracking-tight">
+              Forge <span className="text-forge-accent">Desktop</span>
+            </span>
+          </div>
           <nav className="flex gap-1">
             {(["chat", "tools", "monitor", "settings"] as Tab[]).map((t) => (
               <button
