@@ -106,8 +106,17 @@ pub fn raw_request_bytes(
 }
 
 /// JSON-friendly request command used by the frontend (kept for compatibility).
+///
+/// Must stay `async`: a synchronous Tauri command runs on the main thread, and
+/// [raw_request_bytes] blocks on a socket read until the device closes the
+/// connection or the timeout fires. `sendChat` allows 600s for an agent turn, so
+/// blocking here froze the entire window - the WebView could not render while we
+/// waited, which presented as "the app hangs then misbehaves".
+///
+/// `spawn_blocking` moves the blocking read onto a worker thread so the UI thread
+/// stays free and the app remains responsive for the duration of a long request.
 #[tauri::command]
-pub fn forge_request(
+pub async fn forge_request(
     host: String,
     port: u16,
     token: String,
@@ -118,9 +127,14 @@ pub fn forge_request(
 ) -> Result<ForgeResponse, String> {
     let timeout = timeout_secs.unwrap_or(30);
     let payload = body.unwrap_or_default();
-    let headers: Vec<(&str, String)> = vec![("Content-Type", "application/json".to_string())];
-    let (status, bytes) =
-        raw_request_bytes(host, port, token, method, path, &headers, payload.as_bytes(), timeout)?;
+
+    let (status, bytes) = tauri::async_runtime::spawn_blocking(move || {
+        let headers: Vec<(&str, String)> = vec![("Content-Type", "application/json".to_string())];
+        raw_request_bytes(host, port, token, method, path, &headers, payload.as_bytes(), timeout)
+    })
+    .await
+    .map_err(|e| format!("request task failed: {e}"))??;
+
     Ok(ForgeResponse {
         status,
         body: String::from_utf8_lossy(&bytes).to_string(),
