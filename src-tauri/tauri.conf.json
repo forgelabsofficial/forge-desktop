@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "forge-desktop",
+  "productName": "Forge Desktop",
+  "mainBinaryName": "forge-desktop",
   "version": "0.1.0",
   "identifier": "com.thekingsmedia.forge-desktop",
   "build": {

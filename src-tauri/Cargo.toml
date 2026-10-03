@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Desktop companion for Forge OS"
+authors = ["The Kings Media"]
 license = ""
-repository = ""
+repository = "https://github.com/forgelabsofficial/forge-desktop"
 edition = "2021"
 rust-version = "1.77.2"
 
