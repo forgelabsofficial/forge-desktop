@@ -99,7 +99,12 @@ async function rawRequestWithRetry(
   timeoutSecs = 30
 ): Promise<RawResponse> {
   // Task 16.2 - circuit breaker gate (fail fast when open).
-  if (profile && !(await circuitAllow(profile.id))) {
+  // Keyed on host:port rather than profile.id: the UI never passes a profile
+  // (ToolsView/ChatView call callTool/sendChat without one), so keying on
+  // profile.id made the breaker unreachable dead code. The device address is
+  // stable and is what we actually want to fail fast against.
+  const circuitKey = `${cfg.host}:${cfg.port}`;
+  if (!(await circuitAllow(circuitKey))) {
     throw new Error("circuit open - connection failing repeatedly");
   }
 
@@ -114,7 +119,7 @@ async function rawRequestWithRetry(
     }
     try {
       const res = await rawRequest(cfg, method, path, body, timeoutSecs);
-      if (profile) void circuitReport(profile.id, true);
+      void circuitReport(circuitKey, true);
       return res;
     } catch (error) {
       if (error instanceof TokenExpiredError && profile) {
@@ -123,17 +128,17 @@ async function rawRequestWithRetry(
           const newToken = await tokenRotationManager.rotateToken(profile);
           cfg.token = newToken;
           const res = await rawRequest(cfg, method, path, body, timeoutSecs);
-          if (profile) void circuitReport(profile.id, true);
+          void circuitReport(circuitKey, true);
           return res;
         } catch (rotationError) {
-          if (profile) void circuitReport(profile.id, false);
+          void circuitReport(circuitKey, false);
           throw new Error(
             `Authentication failed: ${rotationError instanceof Error ? rotationError.message : String(rotationError)}`
           );
         }
       }
       if (error instanceof NetworkError && attempt < maxNetworkRetries) {
-        if (profile) void circuitReport(profile.id, false);
+        void circuitReport(circuitKey, false);
         continue; // Task 16.1 - exponential backoff retry
       }
       throw error;
@@ -185,7 +190,8 @@ export async function callTool(
   cfg: ConnectionConfig,
   name: string,
   args: Record<string, unknown>,
-  profile?: ConnectionProfile | null
+  profile?: ConnectionProfile | null,
+  opts?: { onOpId?: (opId: string) => void; signal?: AbortSignal }
 ): Promise<string> {
   // Task 14.1 - execution metrics
   const started = metrics.recordToolStart(name);
@@ -204,9 +210,20 @@ export async function callTool(
 
   // Async execution (Task 8.1): poll the operation status until it finishes.
   const opId = j.opId;
+  // Hand the opId to the caller so it can offer a real cancel button -
+  // the device can cancel the underlying Job.
+  opts?.onOpId?.(opId);
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
+    if (opts?.signal?.aborted) {
+      metrics.recordToolEnd(name, started, false);
+      throw new Error(`tool ${name} was cancelled`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
+    if (opts?.signal?.aborted) {
+      metrics.recordToolEnd(name, started, false);
+      throw new Error(`tool ${name} was cancelled`);
+    }
     const sr = await rawRequestWithRetry(
       cfg,
       profile || null,
@@ -234,6 +251,29 @@ export async function callTool(
   throw new Error(`tool ${name} timed out after 120s`);
 }
 
+/**
+ * Cancel a running tool operation on the device.
+ *
+ * The device cancels the real coroutine Job, so the next status poll
+ * reports "cancelled". Returns false if the device has no such operation
+ * (already finished, or the id was never registered).
+ */
+export async function cancelTool(
+  cfg: ConnectionConfig,
+  opId: string,
+  profile?: ConnectionProfile | null
+): Promise<boolean> {
+  const r = await rawRequestWithRetry(
+    cfg,
+    profile || null,
+    "POST",
+    `/api/tool/${opId}/cancel`,
+    undefined,
+    10
+  );
+  return parse<{ cancelled: boolean }>(r).cancelled;
+}
+
 export async function sendChat(
   cfg: ConnectionConfig,
   message: string,
@@ -246,7 +286,11 @@ export async function sendChat(
     "POST",
     "/api/chat",
     { message, session_id: sessionId },
-    600 // agent turns can take minutes
+    // Must stay under the device's own cap (CHAT_TIMEOUT_MS = 10 min in
+    // ForgeHttpServer). If they match, the desktop times out at the same
+    // instant the phone does and never receives the device's error reply,
+    // so a stalled turn just hangs for the full window. 60s of headroom.
+    540 // agent turns can take minutes
   );
   const j = parse<{ ok: boolean; reply: string; session_id: string }>(r);
   return { reply: j.reply, sessionId: j.session_id };

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionConfig, ToolDefinition } from "../types";
-import { callTool } from "../api";
+import { callTool, cancelTool } from "../api";
 import { ToolValidator } from "../toolValidator";
 
 interface Props {
@@ -15,8 +15,20 @@ export default function ToolsView({ cfg }: Props) {
   const [args, setArgs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // opId of the in-flight operation, so the run can actually be cancelled.
+  const [opId, setOpId] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
 
   const validatorRef = useRef<ToolValidator | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Tick the elapsed counter so a long run is visibly progressing rather
+  // than looking frozen on "Running…".
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setElapsed((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [running]);
 
   useEffect(() => {
     const validator = new ToolValidator(cfg);
@@ -77,12 +89,42 @@ export default function ToolsView({ cfg }: Props) {
           return;
         }
       }
-      const out = await callTool(cfg, f.name, coerced);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const out = await callTool(cfg, f.name, coerced, null, {
+        onOpId: (id) => setOpId(id),
+        signal: controller.signal,
+      });
       setResult({ ok: true, text: out });
     } catch (e) {
       setResult({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
       setRunning(false);
+      setOpId(null);
+      setElapsed(0);
+      abortRef.current = null;
+    }
+  }
+
+  /** Ask the device to cancel the in-flight operation, then stop polling. */
+  async function cancel() {
+    abortRef.current?.abort();
+    const id = opId;
+    if (id) {
+      try {
+        const ok = await cancelTool(cfg, id);
+        if (!ok) {
+          setResult({
+            ok: false,
+            text: "Device reported no cancellable operation (it may have just finished).",
+          });
+        }
+      } catch (e) {
+        setResult({
+          ok: false,
+          text: `Cancel failed: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
     }
   }
 
@@ -211,13 +253,34 @@ export default function ToolsView({ cfg }: Props) {
               )}
             </div>
 
-            <button
-              onClick={run}
-              disabled={running}
-              className="mt-6 rounded-lg bg-forge-accent px-4 py-2 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {running ? "Running…" : "Run tool"}
-            </button>
+            <div className="mt-6 flex items-center gap-3">
+              <button
+                onClick={run}
+                disabled={running}
+                className="rounded-lg bg-forge-accent px-4 py-2 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {running ? "Running…" : "Run tool"}
+              </button>
+              {running && (
+                <>
+                  <span className="text-xs tabular-nums text-forge-muted">
+                    {elapsed}s
+                  </span>
+                  <button
+                    onClick={cancel}
+                    disabled={!opId}
+                    title={
+                      opId
+                        ? "Cancel this operation on the device"
+                        : "Waiting for the device to hand back an operation id"
+                    }
+                    className="rounded-lg border border-red-900/60 px-3 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-950/40 disabled:opacity-40"
+                  >
+                    {opId ? "Cancel" : "Cancelling soon…"}
+                  </button>
+                </>
+              )}
+            </div>
 
             {result && (
               <div className="mt-6">
