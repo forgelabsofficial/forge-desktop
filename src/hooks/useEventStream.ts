@@ -165,7 +165,7 @@ export function useEventStream(
       // Task 19.2 - agent turn / tool progress indicators.
       if (msg.type === "agent_turn") {
         const p = (msg.payload ?? {}) as { active?: boolean };
-        setAgentActive(p.active ?? true);
+        setAgentActive(Boolean(p.active));
         return;
       }
       if (msg.type === "tool_start") {
@@ -274,6 +274,7 @@ export function useEventStream(
       client.off("reconnected", onReady);
       client.off("event", onEvent);
       setDesktopToolSender(null);
+      setAgentActive(false);
       client.cleanup();
     };
   }, [cfg]);
